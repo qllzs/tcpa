@@ -95,7 +95,10 @@ func (rpc *Tcparmp) CreateGRETunnel(parms TcpaRequest, reply *string) error {
 	fmt.Println("sat:" + "Result: " + out.String())
 
 	//启动tcp加速器
-	exec.Command("/opt/nkt/tcpa/start.sh").Output()
+	statrCmd := exec.Command("/opt/nkt/tcpa/start.sh")
+	statrCmd.Stdout = &out
+	statrCmd.Stderr = &stderr
+	statrCmd.Run()
 
 	*reply = "succeed"
 
@@ -141,7 +144,10 @@ func (rpc *Tcparmp) ReleaseGRETunnel(parms TcpaRequest, reply *string) error {
 	fmt.Println("del sat:" + "Result: " + out.String())
 
 	//停止tcp加速器
-	exec.Command("/opt/nkt/tcpa/stop.sh").Output()
+	stopCmd := exec.Command("/opt/nkt/tcpa/stop.sh")
+	stopCmd.Stdout = &out
+	stopCmd.Stderr = &stderr
+	stopCmd.Run()
 
 	*reply = "succeed"
 

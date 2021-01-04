@@ -12,12 +12,18 @@ import (
 )
 
 //Ovs ovs
-type Ovs struct {
+type TcpaOvs struct {
+}
+
+//Reply reply
+type Reply struct {
+	ServerIP string `json:"server_ip"`
+	Msg      string `json:"msg"`
 }
 
 func ovsRPCServer() {
 
-	rpc.Register(new(Ovs))
+	rpc.Register(new(TcpaOvs))
 
 	lis, err := net.Listen("tcp", ":50054")
 	if err != nil {
@@ -41,7 +47,7 @@ func ovsRPCServer() {
 }
 
 //CreateOvsGRETunnel   create
-func (rpc *Ovs) CreateOvsGRETunnel(tcpaIP string, reply *string) error {
+func (rpc *TcpaOvs) CreateOvsGRETunnel(tcpaIP string, reply *string) error {
 
 	var err error
 	var out bytes.Buffer
@@ -64,7 +70,7 @@ func (rpc *Ovs) CreateOvsGRETunnel(tcpaIP string, reply *string) error {
 }
 
 //ReleaseOvsGRETunnel release
-func (rpc *Ovs) ReleaseOvsGRETunnel(tcpaIP string, reply *string) error {
+func (rpc *TcpaOvs) ReleaseOvsGRETunnel(tcpaIP string, reply *string) error {
 
 	var err error
 	var out bytes.Buffer
@@ -82,5 +88,26 @@ func (rpc *Ovs) ReleaseOvsGRETunnel(tcpaIP string, reply *string) error {
 	log.Infoln("ovs del:" + "Result: " + out.String())
 
 	*reply = "succeed"
+	return nil
+}
+
+//AddUeToOvs add ue to ovs
+func (rpc *TcpaOvs) AddUeToOvs(ueIP string, reply *Reply) error {
+
+	var err error
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+
+	addCmd := exec.Command("ovs-vsctl", "add-port", "tcpa_ovs_br", ueIP, "--", "set", "interface", ueIP, "type=gre", "options:remote_ip="+ueIP)
+	addCmd.Stdout = &out
+	addCmd.Stderr = &stderr
+	err = addCmd.Run()
+	if err != nil {
+		reply.Msg = fmt.Sprintf("add to ovs" + fmt.Sprint(err) + ":" + stderr.String())
+		log.Errorln("add to ovs" + "Resault " + out.String())
+	}
+	log.Infoln("add to ovs" + "Resault " + out.String())
+
+	reply.Msg = "succeed"
 	return nil
 }

@@ -13,7 +13,7 @@ import (
 
 var xgwIPMap map[uint]string
 
-//Xgwka mme rpc struct
+//Xgwka  rpc struct
 type Xgwka struct {
 }
 
@@ -99,7 +99,7 @@ func clearAllGreTunnel() {
 	reply := ""
 
 	xgwPool.Range(func(ueIP, tcpaIP interface{}) bool {
-		ovsRPCCli.Call("Ovs.ReleaseOvsGRETunnel", tcpaIP, &reply)
+		ovsRPCCli.Call("TcpaOvs.ReleaseOvsGRETunnel", tcpaIP, &reply)
 		if reply == "succeed" {
 			xgwPool.Delete(ueIP)
 			gLoger.WithFields(log.Fields{"ueIP": ueIP, "tcpaIP:": tcpaIP, "reply:": reply}).Infoln("clearAllGreTunnel release ovs")
@@ -141,7 +141,13 @@ func (rpc *Xgwka) CreateGRETunnel(parms Request, reply *Reply) error {
 
 	ta := getTaFromTaPool(taIP)
 	if ta == nil {
-		reply.Msg = "no free ta"
+		ovsRPCCli.Call("TcpaOvs.AddUeToOvs", parms.UeIP, reply.Msg)
+		if reply.Msg == "succeed" {
+			reply.Msg = "succeed"
+			return nil
+		}
+
+		reply.Msg = "no free ta && add ue direct to ovs failed" + "err:" + reply.Msg
 		return nil
 	}
 
@@ -159,7 +165,7 @@ func (rpc *Xgwka) CreateGRETunnel(parms Request, reply *Reply) error {
 		reply.ServerIP = taIP
 
 		//ovs gre
-		ovsRPCCli.Call("Ovs.CreateOvsGRETunnel", taIP, &reply.Msg)
+		ovsRPCCli.Call("TcpaOvs.CreateOvsGRETunnel", taIP, &reply.Msg)
 		if reply.Msg != "succeed" {
 			ta.cli.Call("Tcparmp.ReleaseGRETunnel", tcpaParms, &reply.Msg)
 			ta.IsIdle = true
@@ -202,7 +208,7 @@ func (rpc *Xgwka) ReleaseGRETunnel(parms Request, reply *Reply) error {
 
 	ta.cli.Call("Tcparmp.ReleaseGRETunnel", tcpaParms, &reply.Msg)
 	if reply.Msg == "succeed" {
-		ovsRPCCli.Call("Ovs.ReleaseOvsGRETunnel", tcpaIP, &reply.Msg)
+		ovsRPCCli.Call("TcpaOvs.ReleaseOvsGRETunnel", tcpaIP, &reply.Msg)
 		if reply.Msg == "succeed" {
 			ta.IsIdle = true
 			deleteIPFromXGWPoolByTaIP(tcpaIP)
