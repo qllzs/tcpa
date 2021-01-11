@@ -8,10 +8,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/thinkeridea/go-extend/exnet"
 )
-
-var xgwIPMap map[uint]string
 
 //Xgwka  rpc struct
 type Xgwka struct {
@@ -26,8 +23,9 @@ type TcpaRequest struct {
 
 //Request req
 type Request struct {
-	UeIP     string `json:"ue_ip"`
-	RemoteIP string `json:"remote_ip"`
+	UeIP   string `json:"ue_ip"`
+	TcpaIP string `json:"tcpa_ip"`
+	XgwIP  string `json:"xgw_ip"`
 }
 
 //Reply reply
@@ -36,9 +34,7 @@ type Reply struct {
 	Msg      string `json:"msg"`
 }
 
-func xgwRPCServer() {
-
-	xgwIPMap = make(map[uint]string)
+func init() {
 
 	rpc.Register(new(Xgwka))
 
@@ -59,17 +55,13 @@ func xgwRPCServer() {
 
 			xgwIP := getXgwIPFromRPCConn(conn)
 
+			tcpamObj.xgwNum++
+			tcpamObj.xgwMap[xgwIP] = &[]string{}
+
 			gLoger.WithFields(log.Fields{"addr": xgwIP}).Infoln("xgw sever accept at")
 
 			go jsonrpc.ServeConn(conn)
 
-			id, _ := exnet.IPString2Long(xgwIP)
-			if isXgwReConnect(xgwIP) {
-				clearAllGreTunnel()
-			} else { //xgw 再次上线
-				xgwIPMap[id] = xgwIP
-				gLoger.WithFields(log.Fields{"xgwIp": xgwIP, "xgwIPMap len": len(xgwIPMap)})
-			}
 		}
 	}()
 
@@ -83,101 +75,89 @@ func getXgwIPFromRPCConn(conn net.Conn) string {
 	return ips[0]
 }
 
-func isXgwReConnect(xgwIP string) bool {
+//ClearAllGreTunnel clear
+func (rpc *Xgwka) ClearAllGreTunnel(xgwIP string, reply *Reply) error {
 
-	for _, v := range xgwIPMap {
-		if v == xgwIP {
-			return true
-		}
+	ueIPArr := tcpamObj.xgwMap[xgwIP]
+
+	for _, ueIP := range *ueIPArr {
+		st := tcpamObj.routeMap[ueIP]
+		ta := st.ta
+		ov := st.ov
+
+		ta.cli.Call("Tcparmp.ReleaseGRETunnel", ta.tcpaIP, &reply.Msg)
+		ov.ovsCli.Call("TcpaOvs.ReleaseOvsGRETunnel", ta.tcpaIP, &reply.Msg)
+
+		ta.isIdle = true
+		ov.isIdle = true
+		ov.ueNum--
+		delete(tcpamObj.routeMap, ueIP)
 	}
 
-	return false
-}
+	tcpamObj.xgwMap = make(map[string]*[]string)
 
-func clearAllGreTunnel() {
-
-	reply := ""
-
-	xgwPool.Range(func(ueIP, tcpaIP interface{}) bool {
-		ovsRPCCli.Call("TcpaOvs.ReleaseOvsGRETunnel", tcpaIP, &reply)
-		if reply == "succeed" {
-			xgwPool.Delete(ueIP)
-			gLoger.WithFields(log.Fields{"ueIP": ueIP, "tcpaIP:": tcpaIP, "reply:": reply}).Infoln("clearAllGreTunnel release ovs")
-		}
-		return true
-	})
-
-	var tcpaParms TcpaRequest
-	for tcpaIP, ta := range taPool {
-		tcpaParms.TcpaIP = tcpaIP
-		ta.cli.Call("Tcparmp.ReleaseGRETunnel", tcpaParms, &reply)
-		if reply == "succeed" {
-			ta.IsIdle = true
-		}
-		gLoger.WithFields(log.Fields{"taIP": tcpaIP, "reply:": reply}).Infoln("clearAllGreTunnel release tcpa")
-	}
-
+	reply.Msg = "succeed"
+	return nil
 }
 
 //CreateGRETunnel get
 func (rpc *Xgwka) CreateGRETunnel(parms Request, reply *Reply) error {
 
+	var st *state
+	ueIP := parms.UeIP
+	xgwIP := parms.XgwIP
+
+	//查询hss数据库, 判断此ue ip 是否需要tcp加速
+	tcpaFlag := QueryTcparByUeIP(ueIP)
+	if tcpaFlag != true {
+		reply.Msg = fmt.Sprintf("ueIP %s not need ta", ueIP)
+		gLoger.WithFields(log.Fields{"ueIP": ueIP}).Infoln("ue not need tcpa")
+		return nil
+	}
+
 	//gre tunnel exist
-	if tcpaIP, ok := loadFromXGWPool(parms.UeIP); ok {
-		reply.ServerIP = tcpaIP
+	st = tcpamObj.routeMap[ueIP]
+	if st.ta != nil && st.ta.isIdle == true {
+		reply.ServerIP = st.ta.tcpaIP
 		reply.Msg = "succeed"
 		return nil
 	}
 
-	//查询hss数据库, 判断此ue ip 是否需要tcp加速
-	tcparFlag := QueryTcparByUeIP(parms.UeIP)
-	if tcparFlag != true {
-		reply.Msg = fmt.Sprintf("ueIP %s not need ta", parms.UeIP)
-		return nil
-	}
-
 	//获取空闲tcpa代理
-	taIP := getFreeIPFromTaPool()
-
-	ta := getTaFromTaPool(taIP)
-	if ta == nil {
-		ovsRPCCli.Call("TcpaOvs.AddUeToOvs", parms.UeIP, reply.Msg)
-		if reply.Msg == "succeed" {
-			reply.Msg = "succeed"
-			return nil
-		}
-
-		reply.Msg = "no free ta && add ue direct to ovs failed" + "err:" + reply.Msg
-		return nil
-	}
-
-	ovsIP := GViperCfg.GetString("ovs_ip")
+	st = getFreeRoute()
+	tcpamObj.routeMap[ueIP] = st
+	ta := st.ta
+	ov := st.ov
 
 	var tcpaParms TcpaRequest
-	tcpaParms.UeIP = parms.UeIP
-	tcpaParms.TcpaIP = taIP
-	tcpaParms.OvsIP = ovsIP
+	tcpaParms.UeIP = ueIP
+	tcpaParms.TcpaIP = ta.tcpaIP
+	tcpaParms.OvsIP = ov.ovsIP
 
 	ta.cli.Call("Tcparmp.CreateGRETunnel", tcpaParms, &reply.Msg)
 	if reply.Msg == "succeed" {
-		storeToXGWPool(parms.UeIP, taIP)
-		ta.IsIdle = false
-		reply.ServerIP = taIP
 
 		//ovs gre
-		ovsRPCCli.Call("TcpaOvs.CreateOvsGRETunnel", taIP, &reply.Msg)
+		ovsRPCCli.Call("TcpaOvs.CreateOvsGRETunnel", ta.tcpaIP, &reply.Msg)
 		if reply.Msg != "succeed" {
 			ta.cli.Call("Tcparmp.ReleaseGRETunnel", tcpaParms, &reply.Msg)
-			ta.IsIdle = true
-
-			// if reply.Msg == "connection is shut down" {
-			// 	ok := struct{}{}
-			// 	ovsCh <- ok
-			// }
+			ta.isIdle = true
+			ov.isIdle = true
+			delete(tcpamObj.routeMap, ueIP)
+			return nil
 		}
+
+		ta.isIdle = false //标识此tcpa被使用
+		ov.isIdle = false //标识此ovs 被使用
+		ov.ueNum++
+		reply.ServerIP = ta.tcpaIP //赋值应答消息tcpa ip
 	}
 
-	gLoger.WithFields(log.Fields{"ovsIP": ovsIP, "ueIP": parms.UeIP, "taIP": taIP, "reply ": reply.Msg}).Infoln("CreateGRETunnel")
+	//add ue to xgw map
+	ueIPArr := tcpamObj.xgwMap[xgwIP]
+	*ueIPArr = append(*ueIPArr, ueIP)
+
+	gLoger.WithFields(log.Fields{"ovsIP": ov.ovsIP, "ueIP": parms.UeIP, "taIP": ta.tcpaIP, "reply ": reply.Msg}).Infoln("CreateGRETunnel")
 
 	return nil
 }
@@ -185,47 +165,38 @@ func (rpc *Xgwka) CreateGRETunnel(parms Request, reply *Reply) error {
 //ReleaseGRETunnel get
 func (rpc *Xgwka) ReleaseGRETunnel(parms Request, reply *Reply) error {
 
-	if _, ok := loadFromXGWPool(parms.UeIP); !ok {
+	ueIP := parms.UeIP
+	st := tcpamObj.routeMap[ueIP]
+	if st == nil {
 		reply.Msg = "no gre tunnel created"
 		return nil
 	}
 
-	tcpaIP := getTaFromXgwPool(parms.UeIP)
-	if tcpaIP == "" {
-		reply.Msg = fmt.Sprintf("no found tcpa ip by ue IP:%s", parms.UeIP)
-	}
-
-	ta := getTaFromTaPool(tcpaIP)
+	ta := st.ta
 	if ta == nil {
-		reply.Msg = fmt.Sprintf("ta %s is not exist", tcpaIP)
+		reply.Msg = fmt.Sprintf("ta %s is not exist", ta.tcpaIP)
 		return nil
 	}
+	ov := st.ov
 
-	var tcpaParms TcpaRequest
-	tcpaParms.UeIP = parms.UeIP
-	tcpaParms.TcpaIP = tcpaIP
-	tcpaParms.OvsIP = GViperCfg.GetString("ovs_ip")
-
-	ta.cli.Call("Tcparmp.ReleaseGRETunnel", tcpaParms, &reply.Msg)
+	ta.cli.Call("Tcparmp.ReleaseGRETunnel", ta.tcpaIP, &reply.Msg)
 	if reply.Msg == "succeed" {
-		ovsRPCCli.Call("TcpaOvs.ReleaseOvsGRETunnel", tcpaIP, &reply.Msg)
+		ovsRPCCli.Call("TcpaOvs.ReleaseOvsGRETunnel", ta.tcpaIP, &reply.Msg)
 		if reply.Msg == "succeed" {
-			ta.IsIdle = true
-			deleteIPFromXGWPoolByTaIP(tcpaIP)
-			gLoger.WithFields(log.Fields{"OvsIP": tcpaParms.OvsIP, "ueIP": parms.UeIP, "taIP": tcpaIP, "reply ": reply.Msg}).Infoln("ReleaseGRETunnel tcpa&ovs release succeed")
-		} else {
-			ta.IsIdle = false
-			gLoger.WithFields(log.Fields{"OvsIP": tcpaParms.OvsIP, "ueIP": parms.UeIP, "taIP": tcpaIP, "ovs release reply": reply.Msg}).Errorln("ReleaseGRETunnel tcpa release succeed, ovs release failed")
+			ta.isIdle = true
+			ov.isIdle = true
+			ov.ueNum--
+			delete(tcpamObj.routeMap, ueIP)
 
-			// if reply.Msg == "connection is shut down" {
-			// 	ok := struct{}{}
-			// 	ovsCh <- ok
-			// }
+			gLoger.WithFields(log.Fields{"OvsIP": ov.ovsIP, "ueIP": parms.UeIP, "taIP": ta.tcpaIP, "reply ": reply.Msg}).Infoln("ReleaseGRETunnel tcpa&ovs release succeed")
+		} else {
+
+			gLoger.WithFields(log.Fields{"OvsIP": ov.ovsIP, "ueIP": parms.UeIP, "taIP": ta.tcpaIP, "ovs release reply": reply.Msg}).Errorln("ReleaseGRETunnel tcpa release succeed, ovs release failed")
 
 			return nil
 		}
 	} else {
-		gLoger.WithFields(log.Fields{"OvsIP": tcpaParms.OvsIP, "ueIP": parms.UeIP, "taIP": tcpaIP, "tcpa release reply": reply.Msg}).Errorln("ReleaseGRETunnel tcpa release failed")
+		gLoger.WithFields(log.Fields{"OvsIP": ov.ovsIP, "ueIP": parms.UeIP, "taIP": ta.tcpaIP, "tcpa release reply": reply.Msg}).Errorln("ReleaseGRETunnel tcpa release failed")
 	}
 
 	return nil

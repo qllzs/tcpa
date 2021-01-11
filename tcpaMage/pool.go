@@ -2,95 +2,82 @@ package main
 
 import (
 	"net/rpc"
-	"sync"
 )
 
+var MaxUeNum int
+
 type state struct {
-	cli    *rpc.Client
-	IsIdle bool
+	ov *ovs
+	ta *tcpa
 }
 
-var taPool map[string]*state
-var taMux sync.Mutex
+type tcpa struct {
+	isIdle bool //idle : true, used: false
+	cli    *rpc.Client
+	tcpaIP string
+}
 
-var xgwPool sync.Map //key: ueIP   value:taIP
+type ovs struct {
+	isIdle bool
+	ueNum  int
+	ovsCli *rpc.Client
+	ovsIP  string
+	rpcIP  string
+}
+
+type tcpam struct {
+	xgwNum   int                  //xgw number
+	ueNum    int                  //ue number
+	ovsNum   int                  //ovs number
+	tcpaNum  int                  //tcpa total num
+	xgwMap   map[string]*[]string //xgwIP - ueIP
+	routeMap map[string]*state    //ueIP - state
+	tcpaMap  map[string]*tcpa
+	ovsMap   map[string]*ovs
+}
+
+var tcpamObj *tcpam
 
 func init() {
-	taPool = make(map[string]*state)
+	GViperCfg.SetDefault("max_ue_num", 10)
+	MaxUeNum = GViperCfg.GetInt("max_ue_num")
+	tcpamObj = getNewTcpam()
 }
 
-func addIPToTaPool(taIP string) {
+func getNewTcpam() *tcpam {
 
-	taMux.Lock()
-	defer taMux.Unlock()
-	if taPool[taIP] != nil {
-		delete(taPool, taIP)
-	}
+	var tcpamObj tcpam
 
-	taPool[taIP] = &state{IsIdle: true}
+	tcpamObj.xgwNum = 0
+	tcpamObj.ueNum = 0
+	tcpamObj.ovsNum = 0
+	tcpamObj.tcpaNum = 0
+
+	tcpamObj.xgwMap = make(map[string]*[]string)
+	tcpamObj.routeMap = make(map[string]*state)
+	tcpamObj.tcpaMap = make(map[string]*tcpa)
+	tcpamObj.ovsMap = make(map[string]*ovs)
+
+	return &tcpamObj
 }
 
-func getTaFromTaPool(taIP string) *state {
-	taMux.Lock()
-	defer taMux.Unlock()
+func getFreeRoute() *state {
 
-	return taPool[taIP]
+	var st state
 
-}
-
-func getTaFromXgwPool(ueIP string) string {
-
-	tcpaIP, ok := xgwPool.Load(ueIP)
-
-	if ok {
-		return tcpaIP.(string)
-	}
-
-	return ""
-}
-
-func getFreeIPFromTaPool() string {
-
-	taMux.Lock()
-	defer taMux.Unlock()
-
-	for k, v := range taPool {
-		if v.IsIdle == true {
-			v.IsIdle = false
-			return k
+	for _, ta := range tcpamObj.tcpaMap {
+		if ta.isIdle == true && ta.cli != nil { //not used
+			for _, ov := range tcpamObj.ovsMap {
+				if ov.isIdle == true && ov.ovsCli != nil && ov.ueNum <= MaxUeNum { //not used -- cli ok  -- ueNum ok
+					ta.isIdle = false
+					st.ta = ta
+					ov.isIdle = false
+					st.ov = ov
+					return &st
+				}
+			}
 		}
 	}
 
-	return ""
-}
-
-func deleteIPFromTaPool(taIP string) {
-	taMux.Lock()
-	defer taMux.Unlock()
-
-	delete(taPool, taIP)
-}
-
-func storeToXGWPool(ueIP string, taIP string) {
-
-	xgwPool.Store(ueIP, taIP)
-}
-
-func loadFromXGWPool(ueIP string) (string, bool) {
-
-	taIP, ok := xgwPool.Load(ueIP)
-	if taIP == nil {
-		return "", ok
-	}
-	return taIP.(string), ok
-}
-
-func deleteIPFromXGWPoolByTaIP(tcpaIP string) {
-
-	xgwPool.Range(func(k, v interface{}) bool {
-		if v == tcpaIP {
-			xgwPool.Delete(k)
-		}
-		return true
-	})
+	return nil
 }

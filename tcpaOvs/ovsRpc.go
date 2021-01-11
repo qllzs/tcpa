@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//Ovs ovs
+//TcpaOvs ovs
 type TcpaOvs struct {
 }
 

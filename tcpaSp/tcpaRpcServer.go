@@ -106,7 +106,7 @@ func (rpc *Tcparmp) CreateGRETunnel(parms TcpaRequest, reply *string) error {
 }
 
 //ReleaseGRETunnel rt
-func (rpc *Tcparmp) ReleaseGRETunnel(parms TcpaRequest, reply *string) error {
+func (rpc *Tcparmp) ReleaseGRETunnel(tcpaIP string, reply *string) error {
 
 	var err error
 	var out bytes.Buffer
@@ -114,7 +114,7 @@ func (rpc *Tcparmp) ReleaseGRETunnel(parms TcpaRequest, reply *string) error {
 
 	//校验配对IP与本地IP是否一致
 	localIP := externalIP("ens160").String()
-	if parms.TcpaIP != localIP {
+	if tcpaIP != localIP {
 		*reply = "ta IP CRC error"
 		return nil
 	}

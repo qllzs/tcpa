@@ -19,7 +19,7 @@ func tcpaRPCClient(taIP string) error {
 		return err
 	}
 
-	ta := getTaFromTaPool(taIP)
+	ta := tcpamObj.tcpaMap[taIP]
 
 	ta.cli = jsonrpc.NewClient(conn)
 	if ta.cli == nil {

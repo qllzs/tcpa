@@ -75,10 +75,17 @@ func decodeReport(tcpConn net.Conn, total int, data []byte) error {
 		{
 			//taIP, _ := exnet.Long2IP(req.IP)
 			taIP, _ := exnet.Long2IPString(req.IP)
-			addIPToTaPool(taIP)
+
+			tcpamObj.ueNum++
+
+			var ta tcpa
+			ta.tcpaIP = taIP
+			tcpamObj.tcpaNum++
+			tcpamObj.tcpaMap[taIP] = &ta
+
 			err := tcpaRPCClient(taIP)
 			if err != nil {
-				deleteIPFromTaPool(taIP)
+				delete(tcpamObj.tcpaMap, taIP)
 				return err
 			}
 
@@ -115,7 +122,7 @@ func hearBeat(taIP string) {
 			ticker.Stop()
 			continue
 		case <-ticker.C:
-			delete(taPool, taIP)
+			delete(tcpamObj.tcpaMap, taIP)
 			gLoger.WithFields(log.Fields{"ip:port": taIP}).Errorln("no tcpa hearBeat, dead")
 			return
 		}

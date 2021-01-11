@@ -1,41 +1,53 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
 var ovsRPCCli *rpc.Client
-var ovsCh chan struct{}
 
-func ovsRPCClient() error {
+func init() {
+	ovsMap := GViperCfg.GetStringMapString("ovs")
+
+	for ovsRPCIP, ovsIP := range ovsMap {
+		cli, err := ovsRPCClient(ovsRPCIP)
+		if err != nil {
+			gLoger.WithFields(log.Fields{"ovs rpc ip": ovsRPCIP, "ovs ip": ovsIP}).Errorln(err.Error())
+		}
+
+		tcpamObj.ovsNum++
+		var ov ovs
+		ov.isIdle = false
+		ov.ovsCli = cli
+		ov.ueNum = 0
+		ov.ovsIP = ovsIP
+		ov.rpcIP = ovsRPCIP
+		tcpamObj.ovsMap[ovsIP] = &ov
+
+		gLoger.WithFields(log.Fields{"ovs rpc ip": ovsRPCIP, "ovs ip": ovsIP}).Infoln("create client for ovs rpc Server succeed")
+	}
+
+}
+
+func ovsRPCClient(ovsRPCIP string) (*rpc.Client, error) {
 
 	var err error
 	var conn net.Conn
-	ovsCh = make(chan struct{})
 
-	for {
-
-		ovsIP := GViperCfg.GetString("ovs_rpc_ip")
-		conn, err = net.Dial("tcp", ovsIP+":50054")
-		if err != nil {
-			time.Sleep(time.Second)
-			gLoger.WithFields(log.Fields{"ovsIP": ovsIP}).Errorln("connect ovs failed")
-			continue
-		}
-
-		ovsRPCCli = jsonrpc.NewClient(conn)
-		if ovsRPCCli == nil {
-			gLoger.Errorln("new ovs rpc client failed")
-			continue
-		}
-		gLoger.WithFields(log.Fields{"ovs IP": conn.RemoteAddr().String()}).Infoln("creeat client for ovs rpc Server")
-		<-ovsCh
+	conn, err = net.Dial("tcp", ovsRPCIP+":50054")
+	if err != nil {
+		return nil, err
 	}
 
-	//return nil
+	cli := jsonrpc.NewClient(conn)
+	if ovsRPCCli == nil {
+		return nil, errors.New("new ovs rpc client failed")
+	}
+
+	return cli, nil
 }

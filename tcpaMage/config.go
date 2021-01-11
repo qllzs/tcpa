@@ -11,7 +11,8 @@ var GViperCfg *viper.Viper
 
 func init() {
 	GViperCfg = viper.New()
-	GViperCfg.SetConfigFile("/opt/nkt/tcpaMage/config/tcpaMage.json")
+	//GViperCfg.SetConfigFile("/opt/nkt/tcpaMage/config/tcpaMage.json")
+	GViperCfg.SetConfigFile("./install/opt/nkt/tcpaMage/config/tcpaMage.json")
 
 	err := GViperCfg.ReadInConfig() // Find and read the config file
 	if err != nil {                 // Handle errors reading the config file
