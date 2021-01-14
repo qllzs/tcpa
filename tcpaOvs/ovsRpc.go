@@ -30,7 +30,7 @@ func ovsRPCServer() {
 		log.Errorln("ovs rpc server listen failed:", err.Error())
 		return
 	}
-	log.WithFields(log.Fields{"ovsRpcServerAddr": lis.Addr().String()}).Infoln("ovs rpc server listen at:")
+	log.WithFields(log.Fields{"ovs rpc server listen ip:": lis.Addr().String()}).Infoln("ovs rpc server listen at:")
 
 	for {
 		conn, err := lis.Accept()
@@ -39,7 +39,7 @@ func ovsRPCServer() {
 			continue
 		}
 
-		log.WithFields(log.Fields{"ovsRpcServerAddr": lis.Addr().String()}).Infoln("ovs rpc  server accept at")
+		log.WithFields(log.Fields{"ovs rpc server, tcpa manage ip": conn.RemoteAddr().String()}).Infoln("ovs rpc  server accept")
 
 		go jsonrpc.ServeConn(conn)
 	}
@@ -88,26 +88,5 @@ func (rpc *TcpaOvs) ReleaseOvsGRETunnel(tcpaIP string, reply *string) error {
 	log.Infoln("ovs del:" + "Result: " + out.String())
 
 	*reply = "succeed"
-	return nil
-}
-
-//AddUeToOvs add ue to ovs
-func (rpc *TcpaOvs) AddUeToOvs(ueIP string, reply *Reply) error {
-
-	var err error
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-
-	addCmd := exec.Command("ovs-vsctl", "add-port", "tcpa_ovs_br", ueIP, "--", "set", "interface", ueIP, "type=gre", "options:remote_ip="+ueIP)
-	addCmd.Stdout = &out
-	addCmd.Stderr = &stderr
-	err = addCmd.Run()
-	if err != nil {
-		reply.Msg = fmt.Sprintf("add to ovs" + fmt.Sprint(err) + ":" + stderr.String())
-		log.Errorln("add to ovs" + "Resault " + out.String())
-	}
-	log.Infoln("add to ovs" + "Resault " + out.String())
-
-	reply.Msg = "succeed"
 	return nil
 }

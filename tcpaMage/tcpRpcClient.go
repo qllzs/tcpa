@@ -3,15 +3,11 @@ package main
 import (
 	"net"
 	"net/rpc/jsonrpc"
-	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
 
-func tcpaRPCClient(taIP string) error {
-
-	ips := strings.Split(taIP, ":")
-	taServerIP := ips[0]
+func tcpaRPCClient(taServerIP string) error {
 
 	conn, err := net.Dial("tcp", taServerIP+":50052")
 	if err != nil {
@@ -19,7 +15,7 @@ func tcpaRPCClient(taIP string) error {
 		return err
 	}
 
-	ta := tcpamObj.tcpaMap[taIP]
+	ta := tcpamObj.tcpaMap[taServerIP]
 
 	ta.cli = jsonrpc.NewClient(conn)
 	if ta.cli == nil {
@@ -27,7 +23,9 @@ func tcpaRPCClient(taIP string) error {
 		return err
 	}
 
-	gLoger.WithFields(log.Fields{"taServerIP": taServerIP}).Infoln("create client for ta rpc Server")
+	ta.isIdle = true //tcpa标识空闲可用
+
+	gLoger.WithFields(log.Fields{"tcpa ip": ta.tcpaIP, "tcpa isIdle": ta.isIdle}).Infoln("create client for ta rpc Server")
 
 	return nil
 }

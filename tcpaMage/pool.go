@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/rpc"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var MaxUeNum int
@@ -32,8 +34,8 @@ type tcpam struct {
 	tcpaNum  int                  //tcpa total num
 	xgwMap   map[string]*[]string //xgwIP - ueIP
 	routeMap map[string]*state    //ueIP - state
-	tcpaMap  map[string]*tcpa
-	ovsMap   map[string]*ovs
+	tcpaMap  map[string]*tcpa     //taIP  -- ta
+	ovsMap   map[string]*ovs      //ovsIP  -- ovs
 }
 
 var tcpamObj *tcpam
@@ -41,6 +43,7 @@ var tcpamObj *tcpam
 func init() {
 	GViperCfg.SetDefault("max_ue_num", 10)
 	MaxUeNum = GViperCfg.GetInt("max_ue_num")
+	gLoger.WithFields(log.Fields{"MaxUeNum": MaxUeNum}).Infoln("ovs init")
 	tcpamObj = getNewTcpam()
 }
 
@@ -68,13 +71,13 @@ func getFreeRoute() *state {
 	for _, ta := range tcpamObj.tcpaMap {
 		if ta.isIdle == true && ta.cli != nil { //not used
 			for _, ov := range tcpamObj.ovsMap {
-				if ov.isIdle == true && ov.ovsCli != nil && ov.ueNum <= MaxUeNum { //not used -- cli ok  -- ueNum ok
-					ta.isIdle = false
+				if ov.isIdle == true && ov.ovsCli != nil { //not used -- cli ok  -- ueNum ok
 					st.ta = ta
-					ov.isIdle = false
 					st.ov = ov
+
 					return &st
 				}
+
 			}
 		}
 	}

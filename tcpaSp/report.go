@@ -40,6 +40,7 @@ func connect() {
 			time.Sleep(time.Second * 2)
 			continue
 		}
+		log.Infoln("Dail at:", tcpConn.RemoteAddr().String())
 
 		err := connectReport()
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -76,20 +77,24 @@ func decodeReport(tcpConn net.Conn, total int, data []byte) error {
 			//taIP, _ := exnet.Long2IP(req.IP)
 			taIP, _ := exnet.Long2IPString(req.IP)
 
+			ips := strings.Split(taIP, ":")
+			taServerIP := ips[0]
+
 			tcpamObj.ueNum++
 
 			var ta tcpa
-			ta.tcpaIP = taIP
+			ta.tcpaIP = taServerIP
 			tcpamObj.tcpaNum++
-			tcpamObj.tcpaMap[taIP] = &ta
+			tcpamObj.tcpaMap[taServerIP] = &ta
 
-			err := tcpaRPCClient(taIP)
+			err := tcpaRPCClient(taServerIP)
 			if err != nil {
-				delete(tcpamObj.tcpaMap, taIP)
+				tcpamObj.tcpaNum--
+				delete(tcpamObj.tcpaMap, taServerIP)
 				return err
 			}
 
-			go hearBeat(taIP)
+			go hearBeat(taServerIP)
 
 			//应答连接report
 			tcpConn.Write([]byte("succeed"))
@@ -112,7 +117,7 @@ func decodeReport(tcpConn net.Conn, total int, data []byte) error {
 	return nil
 }
 
-func hearBeat(taIP string) {
+func hearBeat(taServerIP string) {
 
 	for {
 		ticker := time.NewTicker(time.Second * 11)
@@ -122,8 +127,9 @@ func hearBeat(taIP string) {
 			ticker.Stop()
 			continue
 		case <-ticker.C:
-			delete(tcpamObj.tcpaMap, taIP)
-			gLoger.WithFields(log.Fields{"ip:port": taIP}).Errorln("no tcpa hearBeat, dead")
+			tcpamObj.tcpaNum--
+			delete(tcpamObj.tcpaMap, taServerIP)
+			gLoger.WithFields(log.Fields{"ip:port": taServerIP}).Errorln("no tcpa hearBeat, dead")
 			return
 		}
 	}
